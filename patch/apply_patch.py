@@ -224,6 +224,45 @@ t = replace_once(t,
     "manifest WAKE_LOCK")
 write("AndroidManifest.xml", t)
 
+# 9a) setProcessForeground was removed in Android 8 and crashed the detector service.
+AMP = "smali/com/sec/game/gamecast/floatingui/am/ActivityManagerProxy.smali"
+t = read(AMP)
+t = replace_method(t, ".method public setProcessForeground(Landroid/content/Context;IZ)V", "    .locals 0\n    return-void")
+write(AMP, t)
+
+# 9b) Screen capture: use Android's normal consent dialog instead of the
+#     system-only createProjection() call.
+for mpg in ["smali/com/sec/game/gamecast/floatingui/MediaProjectionGetter.smali",
+            "smali_classes2/com/gdg/gamecastlib/mediaprojection/MediaProjectionGetter.smali"]:
+    t = read(mpg)
+    t = replace_method(t, ".method public static getMediaProjection(Landroid/content/Context;Z)Landroid/media/projection/MediaProjection;", """
+    .locals 1
+    invoke-static {p0, p1}, Lcom/sec/game/gamecast/floatingui/OfflineRuntime;->getMediaProjection(Landroid/content/Context;Z)Landroid/media/projection/MediaProjection;
+    move-result-object v0
+    return-object v0
+""")
+    write(mpg, t)
+
+# Tapping record without a grant: stop here (the consent dialog is showing).
+GCC = "smali/com/sec/game/gamecast/floatingui/GameCastController.smali"
+t = read(GCC)
+t = replace_once(t,
+    "    iput-object v14, v0, Lcom/sec/game/gamecast/floatingui/GameCastController;->mMediaProjection:Landroid/media/projection/MediaProjection;\n",
+    "    iput-object v14, v0, Lcom/sec/game/gamecast/floatingui/GameCastController;->mMediaProjection:Landroid/media/projection/MediaProjection;\n"
+    "    if-nez v14, :offline_has_projection\n"
+    "    return-void\n"
+    "    :offline_has_projection\n",
+    "clickRecButton projection")
+write(GCC, t)
+
+t = read("AndroidManifest.xml")
+t = replace_once(t,
+    '<activity android:configChanges="fontScale|keyboard|keyboardHidden|layoutDirection|locale|mcc|mnc|screenLayout|uiMode" android:name="com.sec.game.gamecast.view.activity.TrimVideoActivity"',
+    '<activity android:excludeFromRecents="true" android:exported="false" android:name="com.sec.game.gamecast.floatingui.OfflineProjectionActivity" android:taskAffinity="com.sec.game.gamecast.offlineprojection" android:theme="@android:style/Theme.Translucent.NoTitleBar"/>'
+    '<activity android:configChanges="fontScale|keyboard|keyboardHidden|layoutDirection|locale|mcc|mnc|screenLayout|uiMode" android:name="com.sec.game.gamecast.view.activity.TrimVideoActivity"',
+    "manifest activity")
+write("AndroidManifest.xml", t)
+
 # 9) Add the helper classes (merged into the app's smali tree).
 for base, _dirs, files in os.walk(HELPER):
     for name in files:

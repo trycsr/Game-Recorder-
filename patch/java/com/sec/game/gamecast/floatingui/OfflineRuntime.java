@@ -11,6 +11,8 @@ import android.content.Context;
 import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.pm.ApplicationInfo;
+import android.media.projection.MediaProjection;
+import android.media.projection.MediaProjectionManager;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Handler;
@@ -291,6 +293,99 @@ public final class OfflineRuntime {
             // ignore
         }
         return "";
+    }
+
+    // ------------------------------------------------------- screen capture
+
+    private static MediaProjection sProjection;
+    private static int sResultCode;
+    private static Intent sResultData;
+    private static long sLastConsentRequest;
+
+    /**
+     * Replaces the app's MediaProjectionGetter, which needed a system-only
+     * permission. Returns the granted projection, or null after asking the
+     * user (Android's own dialog); the user then taps record again.
+     */
+    public static synchronized MediaProjection getMediaProjection(Context ctx, boolean unused) {
+        if (sProjection != null) {
+            return sProjection;
+        }
+        Context app = ctx.getApplicationContext() != null ? ctx.getApplicationContext() : ctx;
+        if (sResultData != null) {
+            try {
+                MediaProjectionManager mpm = (MediaProjectionManager) app.getSystemService(Context.MEDIA_PROJECTION_SERVICE);
+                MediaProjection p = mpm.getMediaProjection(sResultCode, (Intent) sResultData.clone());
+                if (p != null) {
+                    keep(p);
+                    return p;
+                }
+            } catch (Throwable t) {
+                // grant can no longer be reused; ask again below
+            }
+            sResultData = null;
+        }
+        long now = System.currentTimeMillis();
+        if (now - sLastConsentRequest > 3000) {
+            sLastConsentRequest = now;
+            try {
+                Intent i = new Intent(app, OfflineProjectionActivity.class);
+                i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_NO_ANIMATION);
+                app.startActivity(i);
+            } catch (Throwable ignored) {
+                // ignore
+            }
+        }
+        return null;
+    }
+
+    static synchronized void onProjectionResult(Context ctx, int resultCode, Intent data) {
+        boolean pt = isPortuguese();
+        if (resultCode == Activity.RESULT_OK && data != null) {
+            sResultCode = resultCode;
+            sResultData = (Intent) data.clone();
+            try {
+                MediaProjectionManager mpm = (MediaProjectionManager) ctx.getSystemService(Context.MEDIA_PROJECTION_SERVICE);
+                MediaProjection p = mpm.getMediaProjection(resultCode, data);
+                if (p != null) {
+                    keep(p);
+                }
+            } catch (Throwable ignored) {
+                // created again on the next tap
+            }
+            toast(ctx, pt ? "Pronto! Toque no botão de gravar de novo." : "Done! Tap the record button again.");
+        } else {
+            toast(ctx, pt ? "Sem essa permissão não dá para gravar a tela." : "Screen recording needs this permission.");
+        }
+    }
+
+    private static void keep(final MediaProjection p) {
+        sProjection = p;
+        try {
+            p.registerCallback(new MediaProjection.Callback() {
+                @Override
+                public void onStop() {
+                    synchronized (OfflineRuntime.class) {
+                        if (sProjection == p) {
+                            sProjection = null;
+                            // A stopped grant can't be trusted again: ask next time
+                            // (Android 8/9 has "don't show again" in that dialog).
+                            sResultData = null;
+                        }
+                    }
+                }
+            }, new Handler(Looper.getMainLooper()));
+        } catch (Throwable ignored) {
+            // ignore
+        }
+    }
+
+    private static void toast(Context ctx, String text) {
+        try {
+            Toast.makeText(ctx.getApplicationContext(), text, Toast.LENGTH_LONG).show();
+        } catch (Throwable ignored) {
+            // ignore
+        }
     }
 
     // ------------------------------------------------------------ permissions

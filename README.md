@@ -18,6 +18,8 @@ que funciona **sem os servidores da Samsung**, desligados em 2018.
 | Bloqueio para aparelhos não-Samsung | Removido |
 | Detecção do jogo aberto usava uma função interna só de Samsung antigo (fazia o app fechar) | Usa o "Acesso aos dados de uso" do Android |
 | Sem pedido de permissão de sobreposição | O app pede "Sobrepor a outros apps" e "Acesso aos dados de uso" |
+| Função `setProcessForeground`, removida no Android 8, fazia o app fechar ao entrar na tela principal | Desativada |
+| Permissão de gravar a tela era obtida por um atalho exclusivo de sistema | Usa a janela normal do Android ("Iniciar gravação?") |
 | Erros fechavam o app sem explicação | O erro é salvo e mostrado na próxima abertura, com botão para copiar |
 
 A gravação em si usa a API do próprio Android (MediaProjection no Android 5+), então não dependia do servidor.
@@ -29,6 +31,7 @@ A gravação em si usa a API do próprio Android (MediaProjection no Android 5+)
 3. Abra o app e aceite as duas permissões que ele pedir (sobreposição e acesso aos dados de uso).
 4. Se um jogo não aparecer na lista, use a opção de adicionar jogos/apps instalados.
 5. Abra o jogo: o botão de gravar aparece por cima dele.
+6. Na primeira vez que tocar em gravar, o Android pergunta se pode gravar a tela. Aceite (se aparecer "Não mostrar novamente", marque) e toque no botão de gravar de novo.
 
 ## Limitações
 
