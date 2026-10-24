@@ -19,7 +19,17 @@ REG = "smali/com/sec/game/gamecastglobal/activity/RegisterGamelistActivity.smali
 
 
 def path(rel):
-    return os.path.join(ROOT, rel)
+    full = os.path.join(ROOT, rel)
+    if rel.startswith("smali") and not os.path.exists(full):
+        inner = rel.split("/", 1)[1]
+        for d in sorted(os.listdir(ROOT)):
+            if d.startswith("smali") and os.path.exists(os.path.join(ROOT, d, inner)):
+                return os.path.join(ROOT, d, inner)
+    return full
+
+
+def exists(rel):
+    return os.path.exists(path(rel))
 
 
 def read(rel):
@@ -117,16 +127,31 @@ write(GPM, t)
 
 # 3) StartActivity: skip end-of-service popup, Samsung-only and internet checks.
 t = read(START)
-# Show the previous crash (if any) first; the dialog then calls runOnCreate().
-t = replace_once(t,
-    "    invoke-direct {p0}, Lcom/sec/game/gamecastglobal/activity/StartActivity;->runEosCheck()V\n",
-    "    const-string v0, \"runOnCreate\"\n"
-    "    invoke-static {p0, v0}, Lcom/sec/game/gamecast/floatingui/OfflineRuntime;->showLastCrash(Landroid/app/Activity;Ljava/lang/String;)Z\n"
-    "    move-result v0\n"
-    "    if-nez v0, :offline_crash_shown\n"
-    "    invoke-direct {p0}, Lcom/sec/game/gamecastglobal/activity/StartActivity;->runOnCreate()V\n"
-    "    :offline_crash_shown\n",
-    "runEosCheck call")
+if "runEosCheck()V" in t:
+    # 0.0.41: skip the end-of-service popup; show the previous crash (if any)
+    # first, the dialog then calls runOnCreate().
+    t = replace_once(t,
+        "    invoke-direct {p0}, Lcom/sec/game/gamecastglobal/activity/StartActivity;->runEosCheck()V\n",
+        "    const-string v0, \"runOnCreate\"\n"
+        "    invoke-static {p0, v0}, Lcom/sec/game/gamecast/floatingui/OfflineRuntime;->showLastCrash(Landroid/app/Activity;Ljava/lang/String;)Z\n"
+        "    move-result v0\n"
+        "    if-nez v0, :offline_crash_shown\n"
+        "    invoke-direct {p0}, Lcom/sec/game/gamecastglobal/activity/StartActivity;->runOnCreate()V\n"
+        "    :offline_crash_shown\n",
+        "runEosCheck call")
+else:
+    # Older versions: all start logic is in onCreate. Show the previous crash
+    # first; closing the dialog restarts this screen.
+    t = replace_once(t,
+        "    move-object/from16 v0, p0\n\n    invoke-virtual {v5, v0}, Lcom/sec/game/gamecast/common/controller/ActivityHandler;->addActivity(Landroid/app/Activity;)V\n",
+        "    move-object/from16 v0, p0\n\n    invoke-virtual {v5, v0}, Lcom/sec/game/gamecast/common/controller/ActivityHandler;->addActivity(Landroid/app/Activity;)V\n"
+        "    const/4 v5, 0x0\n"
+        "    invoke-static {v0, v5}, Lcom/sec/game/gamecast/floatingui/OfflineRuntime;->showLastCrash(Landroid/app/Activity;Ljava/lang/String;)Z\n"
+        "    move-result v5\n"
+        "    if-eqz v5, :offline_no_crash\n"
+        "    return-void\n"
+        "    :offline_no_crash\n",
+        "StartActivity addActivity")
 t = replace_once(t,
     "    invoke-static {}, Lcom/sec/game/gamecast/common/utility/DeviceUtil;->isSamsungDevice()Z\n\n    move-result v5\n",
     "    const/4 v5, 0x1\n",
@@ -226,14 +251,19 @@ write("AndroidManifest.xml", t)
 
 # 9a) setProcessForeground was removed in Android 8 and crashed the detector service.
 AMP = "smali/com/sec/game/gamecast/floatingui/am/ActivityManagerProxy.smali"
-t = read(AMP)
-t = replace_method(t, ".method public setProcessForeground(Landroid/content/Context;IZ)V", "    .locals 0\n    return-void")
-write(AMP, t)
+if exists(AMP):
+    t = read(AMP)
+    t = replace_method(t, ".method public setProcessForeground(Landroid/content/Context;IZ)V", "    .locals 0\n    return-void")
+    write(AMP, t)
 
 # 9b) Screen capture: use Android's normal consent dialog instead of the
 #     system-only createProjection() call.
-for mpg in ["smali/com/sec/game/gamecast/floatingui/MediaProjectionGetter.smali",
-            "smali_classes2/com/gdg/gamecastlib/mediaprojection/MediaProjectionGetter.smali"]:
+getters = [g for g in ["smali/com/sec/game/gamecast/floatingui/MediaProjectionGetter.smali",
+                       "smali/com/gdg/gamecastlib/mediaprojection/MediaProjectionGetter.smali",
+                       "smali/com/gdg/gamecastlib/v2/MediaProjectionGetter.smali"] if exists(g)]
+if not getters:
+    raise SystemExit("no MediaProjectionGetter found")
+for mpg in getters:
     t = read(mpg)
     t = replace_method(t, ".method public static getMediaProjection(Landroid/content/Context;Z)Landroid/media/projection/MediaProjection;", """
     .locals 1
@@ -257,11 +287,21 @@ write(GCC, t)
 
 t = read("AndroidManifest.xml")
 t = replace_once(t,
-    '<activity android:configChanges="fontScale|keyboard|keyboardHidden|layoutDirection|locale|mcc|mnc|screenLayout|uiMode" android:name="com.sec.game.gamecast.view.activity.TrimVideoActivity"',
+    "</application>",
     '<activity android:excludeFromRecents="true" android:exported="false" android:name="com.sec.game.gamecast.floatingui.OfflineProjectionActivity" android:taskAffinity="com.sec.game.gamecast.offlineprojection" android:theme="@android:style/Theme.Translucent.NoTitleBar"/>'
-    '<activity android:configChanges="fontScale|keyboard|keyboardHidden|layoutDirection|locale|mcc|mnc|screenLayout|uiMode" android:name="com.sec.game.gamecast.view.activity.TrimVideoActivity"',
+    "</application>",
     "manifest activity")
 write("AndroidManifest.xml", t)
+
+# 9c) Old versions only used the MediaProjection recorder on Android 5.0/5.1
+#     (SDK 21/22) and a firmware-specific native recorder otherwise.
+GCM = "smali/com/gdg/gamecastlib/GameCastMgr.smali"
+if exists(GCM):
+    t = read(GCM)
+    old = "    const/16 v1, 0x15\n\n    if-eq v0, v1, :cond_0\n"
+    if old in t:
+        t = replace_once(t, old, "    const/16 v1, 0x15\n\n    if-ge v0, v1, :cond_0\n", "GameCastMgr SDK check")
+        write(GCM, t)
 
 # 9) Add the helper classes (merged into the app's smali tree).
 for base, _dirs, files in os.walk(HELPER):

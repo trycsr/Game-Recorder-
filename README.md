@@ -1,9 +1,13 @@
 # Game Recorder+ (offline)
 
-Versão modificada do **Game Recorder+ 0.0.41** da Samsung (`com.sec.game.gamecast.global`)
-que funciona **sem os servidores da Samsung**, desligados em 2018.
+Versões modificadas do **Game Recorder+** da Samsung (`com.sec.game.gamecast.global`)
+que funcionam **sem os servidores da Samsung**, desligados em 2018.
 
-**APK pronto:** [`release/GameRecorderPlus-offline-0.0.41.apk`](release/GameRecorderPlus-offline-0.0.41.apk)
+**APKs prontos:**
+- [`release/GameRecorderPlus-offline-0.0.41.apk`](release/GameRecorderPlus-offline-0.0.41.apk) (mais nova, recomendada)
+- [`release/GameRecorderPlus-offline-0.0.24.apk`](release/GameRecorderPlus-offline-0.0.24.apk) (mais antiga)
+
+As duas têm o mesmo nome de pacote: só dá para ter uma instalada. Para trocar da 0.0.41 para a 0.0.24, desinstale a 0.0.41 antes.
 
 ## O que foi mudado
 
@@ -20,6 +24,7 @@ que funciona **sem os servidores da Samsung**, desligados em 2018.
 | Sem pedido de permissão de sobreposição | O app pede "Sobrepor a outros apps" e "Acesso aos dados de uso" |
 | Função `setProcessForeground`, removida no Android 8, fazia o app fechar ao entrar na tela principal | Desativada |
 | Permissão de gravar a tela era obtida por um atalho exclusivo de sistema | Usa a janela normal do Android ("Iniciar gravação?") |
+| 0.0.24: o gravador por MediaProjection só era usado no Android 5.0/5.1 | Usado no Android 5.0 ou mais novo |
 | Erros fechavam o app sem explicação | O erro é salvo e mostrado na próxima abertura, com botão para copiar |
 
 A gravação em si usa a API do próprio Android (MediaProjection no Android 5+), então não dependia do servidor.
@@ -42,7 +47,7 @@ A gravação em si usa a API do próprio Android (MediaProjection no Android 5+)
 ## Como gerar o APK de novo
 
 ```sh
-patch/build.sh caminho/do/apk-original.apk /tmp/build
+patch/build.sh caminho/do/apk-original.apk /tmp/build   # serve para a 0.0.24 e a 0.0.41
 ```
 
 - `patch/java/com/offline/OfflineHelper.java`: lista de jogos local, no lugar do servidor.

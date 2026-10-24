@@ -123,6 +123,16 @@ public final class OfflineRuntime {
         final Runnable cont = new Runnable() {
             @Override
             public void run() {
+                if (continueMethod == null) {
+                    // Restart this screen; the crash file is gone now.
+                    try {
+                        activity.startActivity(activity.getIntent());
+                    } catch (Throwable ignored) {
+                        // ignore
+                    }
+                    activity.finish();
+                    return;
+                }
                 try {
                     Method m = activity.getClass().getDeclaredMethod(continueMethod);
                     m.setAccessible(true);
