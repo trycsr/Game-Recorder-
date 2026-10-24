@@ -117,9 +117,15 @@ write(GPM, t)
 
 # 3) StartActivity: skip end-of-service popup, Samsung-only and internet checks.
 t = read(START)
+# Show the previous crash (if any) first; the dialog then calls runOnCreate().
 t = replace_once(t,
-    "invoke-direct {p0}, Lcom/sec/game/gamecastglobal/activity/StartActivity;->runEosCheck()V",
-    "invoke-direct {p0}, Lcom/sec/game/gamecastglobal/activity/StartActivity;->runOnCreate()V",
+    "    invoke-direct {p0}, Lcom/sec/game/gamecastglobal/activity/StartActivity;->runEosCheck()V\n",
+    "    const-string v0, \"runOnCreate\"\n"
+    "    invoke-static {p0, v0}, Lcom/sec/game/gamecast/floatingui/OfflineRuntime;->showLastCrash(Landroid/app/Activity;Ljava/lang/String;)Z\n"
+    "    move-result v0\n"
+    "    if-nez v0, :offline_crash_shown\n"
+    "    invoke-direct {p0}, Lcom/sec/game/gamecastglobal/activity/StartActivity;->runOnCreate()V\n"
+    "    :offline_crash_shown\n",
     "runEosCheck call")
 t = replace_once(t,
     "    invoke-static {}, Lcom/sec/game/gamecast/common/utility/DeviceUtil;->isSamsungDevice()Z\n\n    move-result v5\n",
@@ -150,8 +156,80 @@ t = replace_method(t,
 """ % {"R": R})
 write(REG, t)
 
-# 5) Add the helper class.
-dst = path("smali/com/offline")
-os.makedirs(dst, exist_ok=True)
-shutil.copy(os.path.join(HELPER, "com/offline/OfflineHelper.smali"), dst)
+# 5) Foreground detection: Usage Access instead of the hidden IProcessObserver API.
+PTM = "smali/com/sec/game/gamecast/floatingui/ProcessTopMonitor.smali"
+t = read(PTM)
+t = replace_method(t,
+    ".method public registerProcessMonitor(Landroid/content/Context;Lcom/sec/game/gamecast/floatingui/ProcessTopMonitorCallback;)V",
+    """
+    .locals 0
+    invoke-static {p1, p2}, Lcom/sec/game/gamecast/floatingui/OfflineRuntime;->startWatcher(Landroid/content/Context;Lcom/sec/game/gamecast/floatingui/ProcessTopMonitorCallback;)V
+    return-void
+""")
+t = replace_method(t, ".method public unregisterProcessMonitor(Landroid/content/Context;)V", """
+    .locals 0
+    invoke-static {}, Lcom/sec/game/gamecast/floatingui/OfflineRuntime;->stopWatcher()V
+    return-void
+""")
+write(PTM, t)
+
+SU = "smali/com/sec/game/gamecast/floatingui/ServiceUtil.smali"
+t = read(SU)
+t = replace_method(t, ".method public static getAppPackageNameByPID(Landroid/content/Context;I)Ljava/lang/String;", """
+    .locals 1
+    invoke-static {p0, p1}, Lcom/sec/game/gamecast/floatingui/OfflineRuntime;->packageForPid(Landroid/content/Context;I)Ljava/lang/String;
+    move-result-object v0
+    return-object v0
+""")
+write(SU, t)
+
+DET = "smali/com/sec/game/gamecast/floatingui/AlwaysPlayAppDetectorService.smali"
+t = read(DET)
+t = replace_method(t, ".method private getAppPackageNameByPID(I)Ljava/lang/String;", """
+    .locals 1
+    invoke-virtual {p0}, Lcom/sec/game/gamecast/floatingui/AlwaysPlayAppDetectorService;->getApplicationContext()Landroid/content/Context;
+    move-result-object v0
+    invoke-static {v0, p1}, Lcom/sec/game/gamecast/floatingui/OfflineRuntime;->packageForPid(Landroid/content/Context;I)Ljava/lang/String;
+    move-result-object v0
+    return-object v0
+""")
+write(DET, t)
+
+# 6) Crash logger, installed as soon as the app starts.
+APP = "smali/com/sec/game/gamecastglobal/GameCastApplication.smali"
+t = read(APP)
+t = replace_once(t,
+    "    invoke-super {p0}, Landroid/app/Application;->onCreate()V\n",
+    "    invoke-super {p0}, Landroid/app/Application;->onCreate()V\n"
+    "    invoke-static {p0}, Lcom/sec/game/gamecast/floatingui/OfflineRuntime;->installCrashLogger(Landroid/content/Context;)V\n",
+    "Application.onCreate")
+write(APP, t)
+
+# 7) Ask for overlay + usage access on the main screen.
+GL = "smali/com/sec/game/gamecastglobal/activity/GamelistActivity.smali"
+t = read(GL)
+t = replace_once(t,
+    "    invoke-super {p0}, Lcom/sec/game/gamecastglobal/CommonActivity;->onResume()V\n",
+    "    invoke-super {p0}, Lcom/sec/game/gamecastglobal/CommonActivity;->onResume()V\n"
+    "    invoke-static {p0}, Lcom/sec/game/gamecast/floatingui/OfflineRuntime;->checkSpecialPermissions(Landroid/app/Activity;)V\n",
+    "GamelistActivity.onResume")
+write(GL, t)
+
+# 8) Usage Access only lists apps that request this permission.
+t = read("AndroidManifest.xml")
+t = replace_once(t,
+    '<uses-permission android:name="android.permission.WAKE_LOCK"/>',
+    '<uses-permission android:name="android.permission.WAKE_LOCK"/>'
+    '<uses-permission android:name="android.permission.PACKAGE_USAGE_STATS"/>',
+    "manifest WAKE_LOCK")
+write("AndroidManifest.xml", t)
+
+# 9) Add the helper classes (merged into the app's smali tree).
+for base, _dirs, files in os.walk(HELPER):
+    for name in files:
+        if name.endswith(".smali"):
+            rel = os.path.relpath(os.path.join(base, name), HELPER)
+            dst = path(os.path.join("smali", rel))
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            shutil.copy(os.path.join(base, name), dst)
 print("patch applied")
